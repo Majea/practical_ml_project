@@ -1,0 +1,140 @@
+---
+title: "Dumbbell lifts classification"
+author: "Maxime Jeanmart"
+date: "Saturday, March 21, 2015"
+output: html_document
+---
+
+# Executive summary
+
+In this document, we'll use machine learning techniques to predict the quality of weight lifting exercise.
+In the original research, six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: one correct and 4 incorrect. The data set we're working with contains the measures from the different sensors placed on the subject,
+along with a class reprensenting the fashion the exercise was performed.
+
+As we'll see we could create a prediction model showing 99% accuracy using a random forest algorithm. 
+This was later confirmed by applying the model with success on 20 samples whose outcome class was unknown.
+
+# Introduction
+We'll be analysing a data set produced in the context of a human activity recognition 
+research (see [2]). The goal was to be able to differentiate correct from incorrect movements during physical activities. In this specific data set, 6 people were asked to lift a dumbbell 10 times in 5 different fashions. Those fashions are reprensented in the data set by letters in the _classe_ column (see [1], chapter 5).
+
+- _A_: exactly according to the specification 
+- _B_: throwing the elbows to the front 
+- _C_: lifting the dumbbell only halfway 
+- _D_: lowering the dumbbell only halfway
+- _E_: throwing the hips to the front
+
+The research team recorded the subject movements using four 9 degrees of freedom Razor inertial measurement units (IMU), which provide three-axes
+acceleration, gyroscope and magnetometer data (see [1], chapter 5). We will try to use machine learning algorithms on this data in order to predict the class of the movements with enough accuracy. We have 2 data sets at our disposal. A first one contains 19622 observations of 160 variables and contains the class of the movement. We'll be using this data set for training and testing the machine learning model. Another data set contains 20 observations and doesn't contain the class. This one will be used as validation set. We can verify that we predicted the correct class by sumitting the result on Coursera web site ([3]).
+
+# Data cleaning and feature selection
+
+The first step is to make the data set tidy. There are some variables in the data set that should not affect the model, such as the user name or the time stamps. From the original paper [1], we see that features were extracted using a sliding window approach ([2], section 5.1). For each step, the following features were calculated: Euler angles (roll, pitch and yaw), raw accelerometer, gyroscope and magnetometer readings. Height statistics were calculated for each Euler angle of the 4 sensors. In the data set, the statistics are available in the rows where $new\_window = yes$. This suggests that those rows contains summary of the other rows in the same time window. In the original paper, they only used those rows for prediction (they used feature selection algorithms and kept some statistics as result). However, I've decided to train the model on raw data instead, thus reducing the number of features to analyze.
+
+So I'll remove from the data set the summary rowsn where $new\_window = yes$, and the statistics columns, which are therefore not relevant anymore. Finally, I will remove some meta data columns, such as $X$ (row index), $user\_name$, time stamps and window columns.
+
+```{r}
+library(lattice);library(ggplot2);library(caret);
+set.seed(159753)  # enable reproducibility
+
+# there are a lot of blank data, 'NA' and '#DIV/0!' fields that we need to consider as NA values
+data <- read.csv("pml-training.csv", na.strings=c('', 'NA', '#DIV/0!', ' '), stringsAsFactors=FALSE)
+
+# the outcome must stay a factor for random forest
+data[,'classe'] <- as.factor(data[,'classe'])
+
+# remove summary & stat rows
+data <- data[data$new_window=='no',]
+
+# remove index (X), user_name, time stamps and window columns
+data <- data[, setdiff(names(data), c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window'))]
+
+#remove the 8 statistics columns
+toRemove <- grepl("^kurtosis\\_", names(data)) |
+    grepl("^skewness\\_", names(data)) |
+    grepl("^max\\_", names(data)) |
+    grepl("^min\\_", names(data)) |
+    grepl("^amplitude\\_", names(data)) |
+    grepl("^var\\_", names(data)) |
+    grepl("^avg\\_", names(data)) |
+    grepl("^stddev\\_", names(data))
+data <- data[, !toRemove]
+```
+
+After those steps, I've also tried removing columns with little variance using _nearZeroVar_ function. However, no more column could be removed from the data set in that way.
+
+```{r}
+nearZeroVar(data, saveMetrics=TRUE)
+```
+
+We end up with a data set of 19216 observations of 53 variables. As an improvement, we could think of further reducing the number of variables using Principal Component Analysis, but I didn't have time to explore this path in the awarded time frame.
+
+# Data splitting
+
+In order to verify the accuracy of the model we'll train, we split the tidy data set in 2 parts: one for training and one for testing. Only the training part will be used to create our model. The testing part will be used to verify how well the model performs on other data. This is especially useful if we suspect the model will be subject to overfitting.
+
+```{r}
+inTrain <- createDataPartition(data$classe, p=0.01, list=FALSE)
+training <- data[inTrain,]
+testing <- data[-inTrain,]
+```
+
+
+# Model training
+
+The model mostly contains numeric values, so using logistic regression makes sense. However, the original paper suggests that a random forest approach would be better because of the characteristic noise in the sensor data ([2], section 5.2). So we'll follow that direction here.
+
+We'll use k-fold cross-validation to improve the model accuracy. 10 folds were used, repeated 10 times.
+
+```{r}
+fitControl <- trainControl(method="repeatedcv", # k_fold cross validation
+                               number=10, # 10 fold
+                               repeats=10 # repeated 10 times (shuffle between repetitions)
+        )
+fit <- train(classe ~ ., data=training, method="rf", trControl=fitControl, metric="Accuracy")
+fit
+```
+
+We can notice that, in the end, the number of variables used at each split is only 2 (_mtry = 2_). We can verify in the following plot that the number of randomly selected predictors giving the best accuracy is 2.
+
+```{r}
+ggplot(fit)
+```
+
+
+# Testing and error
+
+We will now use the testing data set to validate our model. First, we'll use the model to predict the _classe_ outcome and then we'll compare those 
+predictions with the actual values stored in the data set. The confusion matrix will tell us the accuracy of the evaluation, among others.
+
+```{r}
+test <- predict(fit, testing)
+confMat <- confusionMatrix(test, testing$classe)
+# accuracy is printed with the confusion matrix
+confMat
+```
+
+This gives us an accuracy of 99.38%. We have enough accuracy for this project, so we don't need to explore other algorithms or use additional improvement techniques. We can now validate our model on the additional 20 samples provided in the _pml-testing.csv_ file.
+
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+validationData <- read.csv("pml-testing.csv", na.strings=c('', 'NA', '#DIV/0!', ' '), stringsAsFactors=FALSE)
+result <- predict(fit, validationData)
+pml_write_files(result)
+result
+```
+
+# References
+
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. _Qualitative Activity Recognition of Weight Lifting Exercises_. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+[2] http://groupware.les.inf.puc-rio.br/har#ixzz3Uzn2UKqS
+
+[3] https://class.coursera.org/predmachlearn-012
