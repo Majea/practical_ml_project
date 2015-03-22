@@ -74,7 +74,7 @@ We end up with a data set of 19216 observations of 53 variables. As an improveme
 In order to verify the accuracy of the model we'll train, we split the tidy data set in 2 parts: one for training and one for testing. Only the training part will be used to create our model. The testing part will be used to verify how well the model performs on other data. This is especially useful if we suspect the model will be subject to overfitting.
 
 ```{r}
-inTrain <- createDataPartition(data$classe, p=0.01, list=FALSE)
+inTrain <- createDataPartition(data$classe, p=0.70, list=FALSE)
 training <- data[inTrain,]
 testing <- data[-inTrain,]
 ```
